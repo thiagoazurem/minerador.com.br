@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Minerador</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <h1>Minerador</h1>
+  <form id="form">
+    <label>Palavra-chave</label>
+    <input type="text" id="keyword" required placeholder="clinica estetica" autocomplete="off" />
+
+    <label>Localização</label>
+    <input type="text" id="location" required placeholder="recife" autocomplete="off" />
+
+    <label>URL do datacollect.php</label>
+    <input type="url" id="endpoint" required placeholder="https://www.beneficente.com.br/minerador/datacollect.php" autocomplete="off" />
+
+    <label>Token (X-Minerador-Token)</label>
+    <input type="password" id="token" required placeholder="mesmo valor do config.php" autocomplete="off" />
+
+    <label class="check">
+      <input type="checkbox" id="stepMode" />
+      <span>Modo passo a passo — obrigatório para pausar e ver o JSON antes de cada POST</span>
+    </label>
+    <p class="hint" style="font-size:12px;color:#64748b;margin:6px 0 0;line-height:1.35;">
+      Marque para pausar em cada passo e ver o resumo do JSON no overlay antes de cada POST ao servidor.
+    </p>
+
+    <div class="row">
+      <button type="submit" id="btnStart">Iniciar</button>
+      <button type="button" id="btnPause">Pausar</button>
+      <button type="button" id="btnResume">Continuar</button>
+    </div>
+  </form>
+  <div id="status" class="status">Pronto.</div>
+  <script src="popup.js"></script>
+</body>
+</html>

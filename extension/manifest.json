@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Minerador Google Local",
+  "version": "1.0.0",
+  "description": "Coleta leads da busca local Google (udm=1) e envia para datacollect.php.",
+  "permissions": ["storage", "tabs", "windows", "scripting", "tts"],
+  "host_permissions": [
+    "https://www.google.com/*",
+    "https://www.google.com.br/*",
+    "https://www.beneficente.com.br/*",
+    "http://www.beneficente.com.br/*",
+    "http://localhost/*",
+    "https://localhost/*"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Minerador Google Local"
+  },
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.google.com/*", "https://www.google.com.br/*"],
+      "js": ["content/google-local-scraper.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
