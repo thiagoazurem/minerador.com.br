@@ -12,8 +12,16 @@
     <label>Palavra-chave</label>
     <input type="text" id="keyword" required placeholder="clinica estetica" autocomplete="off" />
 
-    <label>Localização</label>
-    <input type="text" id="location" required placeholder="recife" autocomplete="off" />
+    <div class="field-row">
+      <div class="field-half">
+        <label for="cidade">Cidade</label>
+        <input type="text" id="cidade" required placeholder="Coimbra" autocomplete="off" />
+      </div>
+      <div class="field-half">
+        <label for="pais">País</label>
+        <input type="text" id="pais" placeholder="Portugal" autocomplete="off" />
+      </div>
+    </div>
 
     <label>URL do datacollect.php</label>
     <input type="url" id="endpoint" required placeholder="https://www.beneficente.com.br/minerador/datacollect.php" autocomplete="off" />
@@ -31,8 +39,7 @@
 
     <div class="row">
       <button type="submit" id="btnStart">Iniciar</button>
-      <button type="button" id="btnPause">Pausar</button>
-      <button type="button" id="btnResume">Continuar</button>
+      <button type="button" id="btnPauseResume">Pausar</button>
     </div>
   </form>
   <div id="status" class="status">Pronto.</div>

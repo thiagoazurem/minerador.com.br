@@ -12,6 +12,24 @@
   /** Ordem: preferir o painel imersivo; fallback para a variante do viewer local. */
   const PANEL_ROOT_SELECTORS = [".immersive-container", "#local-place-viewer"];
 
+  function stateCidade(state) {
+    const c = String(state?.cidade ?? "").trim();
+    if (c) return c;
+    return String(state?.location ?? "").trim();
+  }
+  function statePais(state) {
+    return String(state?.pais ?? "").trim();
+  }
+  function stateSearchLocationTokens(state) {
+    return [stateCidade(state), statePais(state)].filter(Boolean).join(" ");
+  }
+  function stateLocalizacaoString(state) {
+    const cidade = stateCidade(state);
+    const pais = statePais(state);
+    if (cidade && pais) return `${cidade}, ${pais}`;
+    return cidade || pais;
+  }
+
   const DEBUG = true;
   function dlog(...args) {
     if (DEBUG) console.log("[minerador]", ...args);
@@ -42,8 +60,17 @@
   function previewPayload(p) {
     try {
       const clone = { ...p };
-      if (clone.aba_sobre_html) {
-        clone.aba_sobre_html = `[${(clone.aba_sobre_html || "").length} chars]`;
+      if (Array.isArray(clone.medias)) {
+        clone.medias = `[${clone.medias.length} media(s)]`;
+      }
+      if (clone.comentarios && typeof clone.comentarios === "object") {
+        const n = Array.isArray(clone.comentarios.itens)
+          ? clone.comentarios.itens.length
+          : 0;
+        clone.comentarios = `[comentarios: ${n} item(ns)]`;
+      }
+      if (typeof clone.mapurl === "string" && clone.mapurl.length > 80) {
+        clone.mapurl = clone.mapurl.slice(0, 80) + "…";
       }
       return JSON.stringify(clone, null, 2).slice(0, 500);
     } catch (_) {
@@ -57,8 +84,15 @@
       if (Array.isArray(clone.leads)) {
         clone.leads = clone.leads.map((L) => {
           const c = { ...L };
-          if (c.aba_sobre_html) {
-            c.aba_sobre_html = `[${(c.aba_sobre_html || "").length} chars]`;
+          if (Array.isArray(c.medias)) {
+            c.medias = `[${c.medias.length} media(s)]`;
+          }
+          if (c.comentarios && typeof c.comentarios === "object") {
+            const n = Array.isArray(c.comentarios.itens) ? c.comentarios.itens.length : 0;
+            c.comentarios = `[comentarios: ${n} item(ns)]`;
+          }
+          if (typeof c.mapurl === "string" && c.mapurl.length > 80) {
+            c.mapurl = c.mapurl.slice(0, 80) + "…";
           }
           return c;
         });
@@ -498,34 +532,77 @@
     }
   }
 
-  async function clickSobreTab(root) {
-    const tab = findTab(root, ["sobre", "about"]);
-    dlog("clickSobreTab ->", describeEl(tab));
-    if (tab) {
-      await stepGate(
-        "Clicar na aba 'Sobre': " + describeEl(tab),
-        "antes de extrair innerHTML"
-      );
-      await nativeClick(tab);
-      await sleep(400);
-    } else {
-      dlog("clickSobreTab: aba não encontrada");
+  /**
+   * Código postal no texto livre (primeira ocorrência). Ordem alinhada a minerador/datacollect.php:
+   * EUA ZIP+4, BR `#####-###`, PT `####-###`, Canadá, UK, Irlanda (Eircode), BR 8 dígitos, 5 dígitos.
+   */
+  function extractPostalCodeFromLine(text) {
+    const raw = String(text || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!raw) return "";
+
+    let m = raw.match(/\b(\d{5}-\d{4})\b/);
+    if (m) return m[1];
+
+    m = raw.match(/\b(\d{5}-\d{3})\b/);
+    if (m) return m[1];
+
+    m = raw.match(/\b(\d{4}-\d{3})\b/);
+    if (m) return m[1];
+
+    m = raw.match(/\b([A-Z]\d[A-Z]\s?\d[A-Z]\d)\b/i);
+    if (m) {
+      const compact = m[1].replace(/\s+/g, "").toUpperCase();
+      if (compact.length === 6) {
+        return `${compact.slice(0, 3)} ${compact.slice(3)}`;
+      }
+      return compact;
     }
+
+    m = raw.match(
+      /\b(GIR\s*0AA|[A-Z]{1,2}\d[A-Z0-9]?\s*\d[ABD-HJLNP-UW-Z]{2})\b/i
+    );
+    if (m) return m[1].replace(/\s+/g, " ").toUpperCase();
+
+    m = raw.match(/\b([A-Z]\d{2}\s?[A-Z0-9]{4})\b/i);
+    if (m) {
+      const compact = m[1].replace(/\s+/g, "").toUpperCase();
+      if (compact.length === 7) {
+        return `${compact.slice(0, 3)} ${compact.slice(3)}`;
+      }
+      return compact;
+    }
+
+    m = raw.match(/\b(\d{8})\b/);
+    if (m) return m[1].replace(/^(\d{5})(\d{3})$/, "$1-$2");
+
+    m = raw.match(/\b(\d{5})\b/);
+    if (m) return m[1];
+
+    return "";
   }
 
   function parseAddressFromText(text) {
-    const raw = (text || "").replace(/^Endereço:\s*/i, "").trim();
+    const raw = (text || "")
+      .replace(/^Endereço:\s*/i, "")
+      .replace(/^Address:\s*/i, "")
+      .trim();
     let cidade = "";
-    let uf = "";
+    let estado = "";
     let cep = "";
-    const mCep = raw.match(/(\d{5}-?\d{3})\s*$/);
-    if (mCep) cep = mCep[1].replace(/(\d{5})(\d{3})/, "$1-$2");
     const mUf = raw.match(/,\s*([^,]+)\s*-\s*([A-Z]{2})\s*,?\s*(\d{5}-?\d{3})?\s*$/i);
     if (mUf) {
       cidade = mUf[1].trim();
-      uf = mUf[2].toUpperCase();
+      estado = mUf[2].toUpperCase();
+      if (mUf[3]) cep = mUf[3].replace(/^(\d{5})(\d{3})$/, "$1-$2");
     }
-    return { endereco_completo: raw, cidade, uf, cep };
+    if (!cep) {
+      const mEnd = raw.match(/(\d{5}-?\d{3})\s*$/);
+      if (mEnd) cep = mEnd[1].replace(/^(\d{5})(\d{3})$/, "$1-$2");
+    }
+    if (!cep) cep = extractPostalCodeFromLine(raw);
+    return { endereco_completo: raw, cidade, estado, cep };
   }
 
   function parseAddressFromAria(aria) {
@@ -538,6 +615,25 @@
     if (/\d{5}-?\d{3}\b/.test(t)) return true;
     if (/,/.test(t) && /\s-\s[A-Z]{2}\b/.test(t)) return true;
     if (/,/.test(t) && /[Rr]\.?\s|Av\.|Rua\s|Rod\./.test(t)) return true;
+    return false;
+  }
+
+  /** Linha de endereço já parece completa (evita ficar preso a aria-label curto do botão). */
+  function addressLineLooksComplete(line) {
+    const t = String(line || "").replace(/\s+/g, " ").trim();
+    if (t.length < 14) return false;
+    if (textLooksLikeBrazilStreetAddress(t)) return true;
+    if (t.length >= 38) return true;
+    if (/,/.test(t) && /\d/.test(t) && t.length >= 22) return true;
+    return false;
+  }
+
+  /** Texto de link Maps com endereço visível (BR ou formato internacional simples). */
+  function textLooksLikeStreetAddressLine(text) {
+    if (textLooksLikeBrazilStreetAddress(text)) return true;
+    const t = (text || "").replace(/\s+/g, " ").trim();
+    if (t.length < 14) return false;
+    if (/,/.test(t) && /\d/.test(t)) return true;
     return false;
   }
 
@@ -554,7 +650,7 @@
    */
   function tryFillAddressFromMapsLink(root, addrParsed) {
     if (!root) return addrParsed;
-    if (String(addrParsed?.endereco_completo || "").trim()) return addrParsed;
+    if (addressLineLooksComplete(addrParsed?.endereco_completo)) return addrParsed;
 
     const anchors = Array.from(
       root.querySelectorAll('a[href*="maps.google"], a[href*="google.com/maps"]')
@@ -564,14 +660,14 @@
       if (!hrefLooksLikeMapsPlaceLink(href)) continue;
       const linkText = (a.innerText || a.textContent || "").replace(/\s+/g, " ").trim();
       if (!linkText || /^site$/i.test(linkText)) continue;
-      if (!textLooksLikeBrazilStreetAddress(linkText)) continue;
+      if (!textLooksLikeStreetAddressLine(linkText)) continue;
       return parseAddressFromText(linkText);
     }
 
     const fragile = root.querySelector("a.zfFVc[href*='maps.google']");
     if (fragile) {
       const linkText = (fragile.innerText || fragile.textContent || "").replace(/\s+/g, " ").trim();
-      if (textLooksLikeBrazilStreetAddress(linkText)) {
+      if (textLooksLikeStreetAddressLine(linkText)) {
         return parseAddressFromText(linkText);
       }
     }
@@ -600,7 +696,7 @@
     });
   }
 
-  /** Depois da aba Sobre: preencher só lacunas (DOM pode ter atualizado). */
+  /** Segunda passagem no painel: preencher só lacunas (DOM pode ter atualizado). */
   function applyPanelFallbacks(base) {
     const root = getImmersiveRoot();
     if (!root || !base) return base;
@@ -608,11 +704,15 @@
     let addrParsed = {
       endereco_completo: base.endereco_completo || "",
       cidade: base.cidade || "",
-      uf: base.uf || "",
+      estado: base.estado || "",
       cep: base.cep || "",
     };
-    if (!String(addrParsed.endereco_completo || "").trim()) {
+    if (!addressLineLooksComplete(addrParsed.endereco_completo)) {
       addrParsed = tryFillAddressFromMapsLink(root, addrParsed);
+    }
+    if (!String(addrParsed.cep || "").trim() && addrParsed.endereco_completo) {
+      const z = extractPostalCodeFromLine(addrParsed.endereco_completo);
+      if (z) addrParsed = { ...addrParsed, cep: z };
     }
 
     const telefones = Array.isArray(base.telefones) ? [...base.telefones] : [];
@@ -637,7 +737,7 @@
       ...base,
       endereco_completo: addrParsed.endereco_completo,
       cidade: addrParsed.cidade,
-      uf: addrParsed.uf,
+      estado: addrParsed.estado,
       cep: addrParsed.cep,
       telefones,
     };
@@ -679,14 +779,14 @@
    */
   function extractFromSerpRow(anchorEl) {
     const scope = getSerpExtractionScope(anchorEl);
-    if (!scope) return { nome: "", nota: null, total_avaliacoes: null, categoria: "" };
+    if (!scope) return { nome: "", nota: null, rate_num: null, categoria: "" };
 
     const heading = scope.querySelector('[role="heading"]');
     let nome = "";
     if (heading) nome = (heading.textContent || "").replace(/\s+/g, " ").trim();
 
     let nota = null;
-    let total_avaliacoes = null;
+    let rate_num = null;
     const candidates = scope.querySelectorAll(
       '[role="img"][aria-label*="classificação" i], [role="img"][aria-label*="Classificacao" i], ' +
         '[role="img"][aria-label*="Avaliação" i], [role="img"][aria-label*="Avaliacao" i]'
@@ -695,8 +795,8 @@
       const al = el.getAttribute("aria-label") || "";
       const p = parseRatingFromAriaLabel(al);
       if (p.nota != null) nota = p.nota;
-      if (p.total_avaliacoes != null) total_avaliacoes = p.total_avaliacoes;
-      if (nota != null && total_avaliacoes != null) break;
+      if (p.rate_num != null) rate_num = p.rate_num;
+      if (nota != null && rate_num != null) break;
     }
 
     let categoria = "";
@@ -733,34 +833,34 @@
       }
     }
 
-    return { nome, nota, total_avaliacoes, categoria };
+    return { nome, nota, rate_num, categoria };
   }
 
-  /** Sobrescreve nome/nota/total_avaliacoes/categoria com dados da lista SERP quando disponíveis. */
+  /** Sobrescreve nome/nota/rate_num/categoria com dados da lista SERP quando disponíveis. */
   function applySerpPreviewToBase(serp, base) {
     const out = { ...base };
     if (serp.nome) out.nome = serp.nome;
     if (serp.nota != null) out.nota = serp.nota;
-    if (serp.total_avaliacoes != null) out.total_avaliacoes = serp.total_avaliacoes;
+    if (serp.rate_num != null) out.rate_num = serp.rate_num;
     if (serp.categoria) out.categoria = serp.categoria;
     return out;
   }
 
   function parseRatingFromAriaLabel(al) {
     let nota = null;
-    let total_avaliacoes = null;
-    if (!al) return { nota, total_avaliacoes };
+    let rate_num = null;
+    if (!al) return { nota, rate_num };
     const mCrit = al.match(/(\d+)\s*(críticas|criticas)/i);
-    if (mCrit) total_avaliacoes = parseInt(mCrit[1], 10);
-    if (total_avaliacoes == null) {
+    if (mCrit) rate_num = parseInt(mCrit[1], 10);
+    if (rate_num == null) {
       const mAv = al.match(/(\d+)\s+avaliações(?:\s+de\s+usuários)?/i) ||
         al.match(/(\d+)\s+avaliacoes(?:\s+de\s+usuarios)?/i);
-      if (mAv) total_avaliacoes = parseInt(mAv[1], 10);
+      if (mAv) rate_num = parseInt(mAv[1], 10);
     }
     const mNota = al.match(/(\d+[.,]\d+)\s+de\s+5/i) ||
       al.match(/(\d+[.,]\d+)\s*(?:em|de)\s+5/i);
     if (mNota) nota = parseFloat(mNota[1].replace(",", "."));
-    return { nota, total_avaliacoes };
+    return { nota, rate_num };
   }
 
   function fillFromLuAttributeList(scope, state) {
@@ -770,21 +870,21 @@
       const al = node.getAttribute("aria-label") || "";
       const p = parseRatingFromAriaLabel(al);
       if (state.nota == null && p.nota != null) state.nota = p.nota;
-      if (state.total_avaliacoes == null && p.total_avaliacoes != null) {
-        state.total_avaliacoes = p.total_avaliacoes;
+      if (state.rate_num == null && p.rate_num != null) {
+        state.rate_num = p.rate_num;
       }
     }
-    if (state.nota == null || state.total_avaliacoes == null) {
+    if (state.nota == null || state.rate_num == null) {
       const blob = (lu.textContent || "").replace(/\s+/g, " ").trim();
       const p2 = parseRatingFromAriaLabel(blob);
       if (state.nota == null && p2.nota != null) state.nota = p2.nota;
-      if (state.total_avaliacoes == null && p2.total_avaliacoes != null) {
-        state.total_avaliacoes = p2.total_avaliacoes;
+      if (state.rate_num == null && p2.rate_num != null) {
+        state.rate_num = p2.rate_num;
       }
     }
-    if (state.total_avaliacoes == null) {
+    if (state.rate_num == null) {
       const mParen = (lu.textContent || "").match(/\((\d+)\)/);
-      if (mParen) state.total_avaliacoes = parseInt(mParen[1], 10);
+      if (mParen) state.rate_num = parseInt(mParen[1], 10);
     }
   }
 
@@ -817,7 +917,10 @@
     const rawBlock = (wrap.innerText || wrap.textContent || "")
       .replace(/\s+/g, " ")
       .trim();
-    const stripped = rawBlock.replace(/^.*?\bEndereço\b\s*:?\s*/i, "").trim();
+    const stripped = rawBlock
+      .replace(/^.*?\bEndereço\b\s*:?\s*/i, "")
+      .replace(/^.*?\bAddress\b\s*:?\s*/i, "")
+      .trim();
     if (stripped.length >= 8) return stripped;
     let best = "";
     for (const el of wrap.querySelectorAll("span")) {
@@ -836,30 +939,30 @@
     scopes.push(root);
 
     let nota = null;
-    let total_avaliacoes = null;
+    let rate_num = null;
     let categoria = "";
 
     for (const scope of scopes) {
-      if (total_avaliacoes != null) break;
+      if (rate_num != null) break;
       const crit = scope.querySelector(
         '[aria-label*="críticas" i], [aria-label*="criticas" i]'
       );
       if (crit) {
         const al = crit.getAttribute("aria-label") || "";
         const m = al.match(/(\d+)\s*(críticas|criticas)/i);
-        if (m) total_avaliacoes = parseInt(m[1], 10);
+        if (m) rate_num = parseInt(m[1], 10);
       }
     }
     for (const scope of scopes) {
-      if (total_avaliacoes != null) break;
+      if (rate_num != null) break;
       const nodes = scope.querySelectorAll(
         '[aria-label*="avaliações" i], [aria-label*="avaliacoes" i]'
       );
       for (const node of nodes) {
         const al = node.getAttribute("aria-label") || "";
         const p = parseRatingFromAriaLabel(al);
-        if (p.total_avaliacoes != null) {
-          total_avaliacoes = p.total_avaliacoes;
+        if (p.rate_num != null) {
+          rate_num = p.rate_num;
           break;
         }
       }
@@ -869,25 +972,25 @@
       '[role="img"][aria-label*="Classificação" i], [role="img"][aria-label*="Classificacao" i], ' +
       '[role="img"][aria-label*="Avaliação" i], [role="img"][aria-label*="Avaliacao" i]';
     for (const scope of scopes) {
-      if (nota != null && total_avaliacoes != null) break;
+      if (nota != null && rate_num != null) break;
       const imgs = scope.querySelectorAll(imgSelectors);
       for (const img of imgs) {
         const al = img.getAttribute("aria-label") || "";
         const p = parseRatingFromAriaLabel(al);
         if (nota == null && p.nota != null) nota = p.nota;
-        if (total_avaliacoes == null && p.total_avaliacoes != null) {
-          total_avaliacoes = p.total_avaliacoes;
+        if (rate_num == null && p.rate_num != null) {
+          rate_num = p.rate_num;
         }
-        if (nota != null && total_avaliacoes != null) break;
+        if (nota != null && rate_num != null) break;
       }
     }
 
-    const tmp = { nota, total_avaliacoes };
+    const tmp = { nota, rate_num };
     for (const scope of scopes) {
       fillFromLuAttributeList(scope, tmp);
     }
     nota = tmp.nota;
-    total_avaliacoes = tmp.total_avaliacoes;
+    rate_num = tmp.rate_num;
 
     const nomeEl =
       root.querySelector('h2[data-attrid="title"]') ||
@@ -923,7 +1026,7 @@
       }
     }
 
-    return { nota, total_avaliacoes, categoria };
+    return { nota, rate_num, categoria };
   }
 
   function normalizeOutboundWebsiteHref(href) {
@@ -974,16 +1077,199 @@
     return null;
   }
 
-  function extractSobreHtml(root) {
-    const regions = Array.from(root.querySelectorAll('div[role="region"]')).filter(
-      (d) => {
-        const al = d.getAttribute("aria-label") || "";
-        return /^Sobre\b/i.test(al);
+  /**
+   * Fotos/vídeos do carrossel da Visão geral (painel imersivo).
+   * @returns {Array<{ kind: string, url: string, thumb: string | null }>}
+   */
+  function extractMediasFromImmersive(root) {
+    if (!root) return [];
+    const scope = root.querySelector("g-scrolling-carousel") || root;
+    const seen = new Set();
+    const out = [];
+
+    function pushMedia(item) {
+      const u = (item.url || "").trim();
+      if (!u || seen.has(u)) return;
+      seen.add(u);
+      out.push(item);
+    }
+
+    const isHttp = (s) => /^https?:\/\//i.test(s);
+
+    const buttons = Array.from(scope.querySelectorAll("button.LFeBAd"));
+    for (const btn of buttons) {
+      const vid = btn.querySelector("video");
+      if (vid) {
+        const url =
+          (vid.getAttribute("data-src") || "").trim() ||
+          (vid.getAttribute("src") || "").trim() ||
+          (vid.currentSrc || "").trim();
+        if (!isHttp(url)) continue;
+        let thumb = "";
+        const imgEl = btn.querySelector("img[src]");
+        if (imgEl) {
+          thumb = (imgEl.getAttribute("src") || "").trim();
+          if (thumb.startsWith("data:")) thumb = "";
+          if (thumb && !isHttp(thumb)) thumb = "";
+        }
+        pushMedia({
+          kind: "video",
+          url,
+          thumb: thumb || null,
+        });
+        continue;
       }
+      const img = btn.querySelector("img[src]");
+      if (!img) continue;
+      const url = (img.getAttribute("src") || "").trim();
+      if (!url || url.startsWith("data:")) continue;
+      if (url.length > 8000) continue;
+      if (!isHttp(url)) continue;
+      pushMedia({ kind: "image", url, thumb: null });
+    }
+
+    if (out.length === 0) {
+      const videos = Array.from(scope.querySelectorAll(".miU5xc video, video[data-src], video[src]"));
+      for (const vid of videos) {
+        const url =
+          (vid.getAttribute("data-src") || "").trim() ||
+          (vid.getAttribute("src") || "").trim() ||
+          (vid.currentSrc || "").trim();
+        if (!isHttp(url)) continue;
+        const wrap = vid.closest("button") || vid.parentElement;
+        let thumb = "";
+        const imgEl = wrap ? wrap.querySelector("img[src]") : null;
+        if (imgEl) {
+          thumb = (imgEl.getAttribute("src") || "").trim();
+          if (thumb.startsWith("data:")) thumb = "";
+          if (thumb && !isHttp(thumb)) thumb = "";
+        }
+        pushMedia({
+          kind: "video",
+          url,
+          thumb: thumb || null,
+        });
+      }
+    }
+
+    return out;
+  }
+
+  /** Painel “Resumo de avaliações do Google” no knowledge panel local. */
+  const DATA_ATTRID_REVIEW_SUMMARY =
+    "kc:/collection/knowledge_panels/local_reviewable:review_summary";
+  /** Path do SVG de estrela cheia (amarela) usado nas mini-avaliações do resumo. */
+  const FULL_STAR_PATH_PREFIX = "M6 .6L2.6";
+
+  function countFullStarIcons(starRowEl) {
+    if (!starRowEl) return 0;
+    let n = 0;
+    starRowEl.querySelectorAll("svg path").forEach((p) => {
+      const d = (p.getAttribute("d") || "").trim();
+      if (d.startsWith(FULL_STAR_PATH_PREFIX)) n += 1;
+    });
+    return n;
+  }
+
+  /**
+   * Comentários destacados no resumo (só 5 estrelas): autor no aria-label da foto,
+   * texto em span.ydFrHf, estrelas contando ícones SVG do path acima.
+   * @returns {{ fonte: string, itens: Array<{ autor: string, texto: string, estrelas: number }> }}
+   */
+  function extractReviewSummaryComentariosCincoEstrelas(root) {
+    const empty = { fonte: "google_review_summary", itens: [] };
+    if (!root || typeof root.querySelector !== "function") return empty;
+
+    const panel = root.querySelector(
+      `[data-attrid="${DATA_ATTRID_REVIEW_SUMMARY}"]`
     );
-    if (!regions.length) return "";
-    const last = regions[regions.length - 1];
-    return last.innerHTML || "";
+    if (!panel) return empty;
+
+    const itens = [];
+    const cards = panel.querySelectorAll(".DsGssd.xLGjPd");
+    for (const card of cards) {
+      const quoteSpan = card.querySelector("span.ydFrHf");
+      const texto = (quoteSpan?.textContent || "").replace(/\s+/g, " ").trim();
+      if (!texto) continue;
+
+      const authorImg =
+        card.querySelector("a.M60nmf img[aria-label]") ||
+        card.querySelector("img.TEAxxc[aria-label]");
+      const autor = (authorImg?.getAttribute("aria-label") || "").trim();
+
+      const starRow = card.querySelector('div.dHX2k[role="img"]');
+      const estrelas = countFullStarIcons(starRow);
+      if (estrelas !== 5) continue;
+
+      itens.push({ autor, texto, estrelas });
+    }
+
+    return { fonte: "google_review_summary", itens };
+  }
+
+  function unwrapGoogleRedirectUrl(href) {
+    let h = href || "";
+    try {
+      if (h.startsWith("http") && h.includes("google.com/url")) {
+        const q = new URL(h, location.href).searchParams.get("q");
+        if (q) h = q;
+      }
+    } catch (_) {}
+    return h;
+  }
+
+  function hrefLooksLikeGoogleMapsOpenUrl(href) {
+    const raw = (href || "").trim();
+    if (!raw || /^javascript:/i.test(raw)) return false;
+    try {
+      const u = new URL(raw, location.href);
+      const host = u.hostname.toLowerCase();
+      if (host === "maps.google.com") return true;
+      if (
+        (host === "www.google.com" ||
+          host === "google.com" ||
+          host === "www.google.com.br" ||
+          host === "google.com.br") &&
+        u.pathname.startsWith("/maps")
+      ) {
+        return true;
+      }
+      return false;
+    } catch (_) {
+      return /maps\.google\.com/i.test(raw) || /google\.com\/maps/i.test(raw);
+    }
+  }
+
+  function extractMapsUrlFromImmersive(root) {
+    if (!root || typeof root.querySelectorAll !== "function") return "";
+    const orderedSelectors = [
+      'a.zfFVc[href*="maps.google"]',
+      'a.zfFVc[href*="google.com/maps"]',
+      'a[href^="https://maps.google.com"]',
+      'a[href^="http://maps.google.com"]',
+      'a[href*="//maps.google.com"]',
+    ];
+    const tryAnchors = (anchors) => {
+      for (const a of anchors) {
+        if (!a || !isVisible(a)) continue;
+        let href = (a.getAttribute("href") || a.href || "").trim();
+        href = unwrapGoogleRedirectUrl(href);
+        try {
+          const u = new URL(href, location.href);
+          u.hash = "";
+          href = u.toString();
+        } catch (_) {}
+        if (!hrefLooksLikeGoogleMapsOpenUrl(href)) continue;
+        return href;
+      }
+      return "";
+    };
+    for (const sel of orderedSelectors) {
+      const found = tryAnchors(Array.from(root.querySelectorAll(sel)));
+      if (found) return found;
+    }
+    const all = Array.from(root.querySelectorAll("a[href]"));
+    return tryAnchors(all);
   }
 
   function extractFromImmersive(root) {
@@ -993,14 +1279,26 @@
       root.querySelector("h2");
     const nome = (nomeEl?.textContent || "").trim();
 
-    const { nota, total_avaliacoes, categoria } = extractRatingReviewsCategory(root);
+    const { nota, rate_num, categoria } = extractRatingReviewsCategory(root);
 
     const addrBtn = root.querySelector('[data-item-id="address"]');
     const addrAria = addrBtn?.getAttribute("aria-label") || "";
     let addrParsed = parseAddressFromAria(addrAria);
-    if (!addrParsed.endereco_completo) {
-      const txt = extractAddressTextFromKcLocation(root);
-      if (txt) addrParsed = parseAddressFromText(txt);
+    const kcTxt = extractAddressTextFromKcLocation(root);
+    const kcTrim = kcTxt.replace(/\s+/g, " ").trim();
+    if (kcTrim) {
+      const ariaLine = String(addrParsed.endereco_completo || "").trim();
+      const fromKc = parseAddressFromText(kcTxt);
+      const kcLine = String(fromKc.endereco_completo || "").trim();
+      if (kcLine) {
+        const preferKc =
+          !addressLineLooksComplete(ariaLine) &&
+          (!ariaLine || kcTrim.length >= ariaLine.length || addressLineLooksComplete(kcLine));
+        const longerKc = addressLineLooksComplete(ariaLine) && kcTrim.length > ariaLine.length + 4;
+        if (preferKc || longerKc) {
+          addrParsed = fromKc;
+        }
+      }
     }
 
     let website = "";
@@ -1039,31 +1337,29 @@
       pushUniquePhone(el.getAttribute("data-phone-number"));
     });
 
-    if (!String(addrParsed.endereco_completo || "").trim()) {
+    if (!addressLineLooksComplete(addrParsed.endereco_completo)) {
       addrParsed = tryFillAddressFromMapsLink(root, addrParsed);
     }
     if (!telefones.length) {
       tryAppendPhonesFallback(root, telefoneSeen, pushUniquePhone);
     }
 
-    let addweb = "nao";
-    const addWebBtn = Array.from(root.querySelectorAll('div[role="button"], button')).find(
-      (el) => (el.textContent || "").trim() === "Adicionar website"
-    );
-    if (addWebBtn) addweb = "sim";
+    const comentarios_google = extractReviewSummaryComentariosCincoEstrelas(root);
+    const mapurl = extractMapsUrlFromImmersive(root);
 
     return {
       nome,
       nota,
-      total_avaliacoes,
+      rate_num,
       categoria,
       endereco_completo: addrParsed.endereco_completo,
       cidade: addrParsed.cidade,
-      uf: addrParsed.uf,
+      estado: addrParsed.estado,
       cep: addrParsed.cep,
       website,
+      mapurl,
       telefones,
-      addweb,
+      comentarios_google,
     };
   }
 
@@ -1101,7 +1397,7 @@
     if (webhpSearchDone) return;
     webhpSearchDone = true;
     const q =
-      `${(state.keyword || "").trim()} ${(state.location || "").trim()}`.trim();
+      `${(state.keyword || "").trim()} ${stateSearchLocationTokens(state)}`.trim();
     const input =
       document.querySelector('textarea[name="q"]') ||
       document.querySelector('input[name="q"]');
@@ -1135,7 +1431,7 @@
 
   async function preflightSubmit(state) {
     const q =
-      `${(state.keyword || "").trim()} ${(state.location || "").trim()}`.trim();
+      `${(state.keyword || "").trim()} ${stateSearchLocationTokens(state)}`.trim();
     await stepGate(`Submeter busca em webhp?udm=1\nq = "${q}"`);
     await submitSearchFromWebhp(state);
   }
@@ -1332,37 +1628,48 @@
 
       let base = extractFromImmersive(root);
       base = applySerpPreviewToBase(serpPreview, base);
+      const medias = extractMediasFromImmersive(root);
       await stepGate(
-        "Extrai dados da Visão geral (nome/nota/avaliações/categoria preferem a lista SERP). Vou clicar em 'Sobre'.\nNome: " +
+        "Extrai dados da Visão geral (nome/nota/avaliações/categoria preferem a lista SERP).\nNome: " +
           (base.nome || "(vazio)") +
           "\nEndereço: " +
           (base.endereco_completo || "(vazio)") +
           "\nTelefones: " +
-          JSON.stringify(base.telefones || []),
+          JSON.stringify(base.telefones || []) +
+          "\nMídias: " +
+          medias.length +
+          "\nComentários (resumo Google, só 5★): " +
+          (Array.isArray(base.comentarios_google?.itens) ? base.comentarios_google.itens.length : 0) +
+          "\nMapa (URL Maps): " +
+          (base.mapurl ? "sim" : "não"),
         `Lead ${idxInPage}/${totalAnchors} — página ${pagina}`
       );
-      await clickSobreTab(root);
-      await randomDelay(200, 450);
-      const sobreHtml = extractSobreHtml(document.body);
       base = applyPanelFallbacks(base);
 
       const coletado_em = new Date().toISOString();
+      const cg = base.comentarios_google;
+      const comentariosPayload =
+        cg && Array.isArray(cg.itens) && cg.itens.length > 0 ? cg : null;
+
+      const cidadeLead =
+        String(base.cidade || "").trim() || stateCidade(state);
       const payload = {
         search_slug: state.searchSlug || null,
         keyword: state.keyword || "",
-        localizacao: state.location || "",
         nome: base.nome,
         nota: base.nota,
-        total_avaliacoes: base.total_avaliacoes,
+        rate_num: base.rate_num,
         categoria: base.categoria,
         endereco_completo: base.endereco_completo,
-        cidade: base.cidade,
-        uf: base.uf,
+        cidade: cidadeLead,
+        estado: base.estado,
+        pais: statePais(state),
         cep: base.cep,
         website: base.website,
         telefones: base.telefones,
-        addweb: base.addweb,
-        aba_sobre_html: sobreHtml,
+        medias,
+        ...(comentariosPayload ? { comentarios: comentariosPayload } : {}),
+        ...(base.mapurl ? { mapurl: base.mapurl } : {}),
         query,
         pagina,
         url_resultado: hrefKey,
@@ -1387,7 +1694,7 @@
       const batchBody = {
         search_slug: state.searchSlug || null,
         keyword: state.keyword || "",
-        localizacao: state.location || "",
+        localizacao: stateLocalizacaoString(state),
         query,
         pagina,
         leads: pageLeads,
