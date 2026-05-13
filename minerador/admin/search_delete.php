@@ -16,7 +16,18 @@ if ($searchId <= 0) {
     exit('search_id inválido');
 }
 
+$scopeRedirect = (string) ($_POST['redirect_scope'] ?? '') === 'mine' ? 'mine' : 'all';
+$scopeForCheck = $scopeRedirect;
+
 $pdo = minerador_pdo();
+$st = $pdo->prepare('SELECT * FROM minerador_searches WHERE id = ? LIMIT 1');
+$st->execute([$searchId]);
+$row = $st->fetch();
+if (!$row || !minerador_admin_can_manage_search($row, $scopeForCheck)) {
+    http_response_code(403);
+    exit('Sem permissão para excluir esta busca.');
+}
+
 $pdo->beginTransaction();
 try {
     $del1 = $pdo->prepare('DELETE FROM minerador_leads WHERE search_id = ?');
@@ -30,5 +41,9 @@ try {
     exit('Erro ao excluir busca: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8'));
 }
 
-header('Location: searches.php?deleted=1');
+$redir = 'searches.php?deleted=1';
+if ($scopeRedirect === 'mine') {
+    $redir .= '&scope=mine';
+}
+header('Location: ' . $redir);
 exit;
