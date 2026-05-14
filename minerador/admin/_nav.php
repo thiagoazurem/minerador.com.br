@@ -72,8 +72,8 @@ function minerador_admin_header_css(): string
     .admin-header { padding:16px 20px; background:#111827; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }
     .admin-header-left { display:flex; align-items:center; flex-wrap:wrap; gap:12px 16px; min-width:0; }
     .admin-header-left h1 { margin:0; font-size:18px; font-weight:700; }
-    .admin-subtitle { font-size:13px; color:#9ca3af; font-weight:400; }
     .admin-header-nav { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+    .admin-subtitle { flex-basis:100%; width:100%; margin:0; padding-top:2px; font-size:13px; color:#9ca3af; font-weight:400; text-align:center; }
     .scope-toggle { display:inline-flex; border:1px solid #374151; border-radius:8px; overflow:hidden; font-size:13px; font-weight:600; }
     .scope-toggle a { padding:7px 12px; text-decoration:none; color:#e5e7eb; background:#1f2937; }
     .scope-toggle a:hover { background:#374151; }
@@ -141,12 +141,12 @@ function minerador_admin_render_page_header(?string $subtitleHtml, array $navOpt
     echo '<div class="admin-header-left">';
     echo '<h1>Minerador.pt</h1>';
     minerador_admin_render_scope_toggle();
-    if ($subtitleHtml !== null && $subtitleHtml !== '') {
-        echo '<span class="admin-subtitle">' . $subtitleHtml . '</span>';
-    }
     echo '</div>';
     echo '<nav class="admin-header-nav">';
     minerador_admin_render_header_nav($navOpts);
     echo '</nav>';
+    if ($subtitleHtml !== null && $subtitleHtml !== '') {
+        echo '<p class="admin-subtitle">' . $subtitleHtml . '</p>';
+    }
     echo '</header>';
 }

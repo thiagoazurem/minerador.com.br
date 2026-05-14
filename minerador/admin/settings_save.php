@@ -110,6 +110,22 @@ if ($action === 'save_qualificacao_substrings') {
 
 
 
+if ($action === 'save_leads_ignore_terms') {
+
+    minerador_admin_require_config_admin();
+
+    $raw = (string) ($_POST['leads_ignore_terms'] ?? '');
+
+    $raw = mb_substr($raw, 0, 65535, 'UTF-8');
+
+    minerador_settings_set($pdo, MINERADOR_SETTING_LEADS_IGNORE_TERMS, $raw);
+
+    minerador_settings_redirect('saved=ignore_terms' . $scopeQ);
+
+}
+
+
+
 if ($action === 'regenerate_config_token') {
 
     minerador_admin_require_config_admin();

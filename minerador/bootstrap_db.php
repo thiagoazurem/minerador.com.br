@@ -102,6 +102,8 @@ function minerador_lead_hash(string $nome, string $endereco, string $urlResultad
 
 const MINERADOR_SETTING_QUALIFICACAO_SUBSTRINGS = 'qualificacao_website_substrings';
 
+const MINERADOR_SETTING_LEADS_IGNORE_TERMS = 'leads_ignore_terms';
+
 /**
  * Token único para utilizadores delegados (evita colisão com token do config).
  */
@@ -234,6 +236,159 @@ function minerador_settings_get_qualificacao_website_rules(PDO $pdo): array
 function minerador_settings_get_qualificacao_substrings(PDO $pdo): array
 {
     return minerador_settings_get_qualificacao_website_rules($pdo);
+}
+
+/**
+ * Valor bruto de uma chave em `minerador_settings` (string vazia se inexistente).
+ */
+function minerador_settings_get_raw(PDO $pdo, string $key): string
+{
+    try {
+        $st = $pdo->prepare('SELECT setting_value FROM minerador_settings WHERE setting_key = ? LIMIT 1');
+        $st->execute([$key]);
+        $raw = $st->fetchColumn();
+    } catch (Throwable $e) {
+        return '';
+    }
+    if ($raw === false || $raw === null) {
+        return '';
+    }
+
+    return (string) $raw;
+}
+
+/**
+ * Termos a ignorar na coleta (separados por vírgula ou quebra de linha no texto guardado).
+ *
+ * @return list<string>
+ */
+function minerador_settings_parse_ignore_terms(string $raw): array
+{
+    $norm = str_replace(["\r\n", "\r"], "\n", $raw);
+    $norm = str_replace(["\n", "\t"], ',', $norm);
+    $out = [];
+    foreach (explode(',', $norm) as $piece) {
+        $t = trim((string) $piece);
+        if ($t === '') {
+            continue;
+        }
+        $out[] = mb_substr($t, 0, 512, 'UTF-8');
+    }
+
+    return $out;
+}
+
+/**
+ * @return list<string>
+ */
+function minerador_settings_get_leads_ignore_terms(PDO $pdo): array
+{
+    return minerador_settings_parse_ignore_terms(minerador_settings_get_raw($pdo, MINERADOR_SETTING_LEADS_IGNORE_TERMS));
+}
+
+/**
+ * Texto do lead usado para testar termos de ignorar (coleta e limpeza em massa).
+ *
+ * @param array<string, mixed> $fields
+ */
+function minerador_lead_ignore_haystack(array $fields): string
+{
+    $keys = [
+        'nome', 'website', 'query_text', 'keyword', 'endereco_completo', 'categoria',
+        'cidade', 'estado', 'pais', 'url_resultado',
+    ];
+    $parts = [];
+    foreach ($keys as $k) {
+        if (!empty($fields[$k])) {
+            $parts[] = (string) $fields[$k];
+        }
+    }
+    if (!empty($fields['comentarios'])) {
+        $parts[] = (string) $fields['comentarios'];
+    }
+
+    return trim(preg_replace('/\s+/u', ' ', implode(' ', $parts)) ?? '');
+}
+
+/**
+ * @param list<string> $terms
+ */
+function minerador_lead_haystack_matches_ignore_terms(string $haystack, array $terms): bool
+{
+    if ($haystack === '' || $terms === []) {
+        return false;
+    }
+    foreach ($terms as $t) {
+        if ($t === '') {
+            continue;
+        }
+        if (mb_stripos($haystack, $t, 0, 'UTF-8') !== false) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * @param array<string, mixed> $lead Payload JSON (datacollect).
+ * @param list<string> $terms
+ */
+function minerador_lead_payload_matches_ignore_terms(array $lead, array $terms): bool
+{
+    if ($terms === []) {
+        return false;
+    }
+    $comRaw = $lead['comentarios'] ?? null;
+    $comStr = '';
+    if (is_string($comRaw)) {
+        $comStr = $comRaw;
+    } elseif (is_array($comRaw)) {
+        $j = json_encode($comRaw, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $comStr = $j !== false ? $j : '';
+    }
+    $hay = minerador_lead_ignore_haystack([
+        'nome' => $lead['nome'] ?? '',
+        'website' => $lead['website'] ?? '',
+        'query_text' => $lead['query'] ?? '',
+        'keyword' => $lead['keyword'] ?? '',
+        'endereco_completo' => $lead['endereco_completo'] ?? '',
+        'categoria' => $lead['categoria'] ?? '',
+        'cidade' => $lead['cidade'] ?? '',
+        'estado' => $lead['estado'] ?? $lead['uf'] ?? '',
+        'pais' => $lead['pais'] ?? '',
+        'url_resultado' => $lead['url_resultado'] ?? '',
+        'comentarios' => $comStr,
+    ]);
+
+    return minerador_lead_haystack_matches_ignore_terms($hay, $terms);
+}
+
+/**
+ * Website coincide com alguma substring não vazia das regras de qualificação automática.
+ *
+ * @param list<array{substr: string, nivel: string}> $rules
+ */
+function minerador_website_matches_qualificacao_substring(string $website, array $rules): bool
+{
+    $w = trim($website);
+    if ($w === '') {
+        return false;
+    }
+    foreach ($rules as $rule) {
+        if (!is_array($rule)) {
+            continue;
+        }
+        $needle = isset($rule['substr']) ? trim((string) $rule['substr']) : '';
+        if ($needle === '') {
+            continue;
+        }
+        if (mb_stripos($w, $needle, 0, 'UTF-8') !== false) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 function minerador_settings_set(PDO $pdo, string $key, string $value): void

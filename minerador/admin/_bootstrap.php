@@ -24,14 +24,6 @@ function minerador_admin_verify_config(string $user, string $pass): bool
     return password_verify($pass, $hash);
 }
 
-/**
- * @deprecated use minerador_admin_verify_config
- */
-function minerador_admin_verify(string $user, string $pass): bool
-{
-    return minerador_admin_verify_config($user, $pass);
-}
-
 function minerador_admin_verify_delegated(PDO $pdo, string $user, string $pass): ?int
 {
     $u = trim($user);
@@ -110,15 +102,17 @@ function minerador_admin_search_scope_sql(): array
  *
  * Semântica: “Todos” sem filtro extra; `scope=mine` (admin de config) → `owner_key = 'cfg'`; delegado → o seu `owner_user_id`.
  *
+ * @param ?string $configAdminScopeOverride Se não for null, substitui `$_GET['scope']` para admin de config (ex.: POST em scripts que não têm query-string).
+ *
  * @return array{0: string, 1: list<mixed>}
  */
-function minerador_admin_lead_scope_sql(bool $searchJoinedAsS = false): array
+function minerador_admin_lead_scope_sql(bool $searchJoinedAsS = false, ?string $configAdminScopeOverride = null): array
 {
     if (empty($_SESSION['minerador_admin_ok'])) {
         return [' AND 1=0', []];
     }
     if (minerador_admin_is_config_admin()) {
-        $scope = (string) ($_GET['scope'] ?? 'all');
+        $scope = $configAdminScopeOverride !== null ? $configAdminScopeOverride : (string) ($_GET['scope'] ?? 'all');
         if ($scope === 'mine') {
             if ($searchJoinedAsS) {
                 return [' AND s.owner_key = ?', ['cfg']];
@@ -139,6 +133,77 @@ function minerador_admin_lead_scope_sql(bool $searchJoinedAsS = false): array
     }
 
     return [' AND EXISTS (SELECT 1 FROM minerador_searches sx WHERE sx.id = minerador_leads.search_id AND sx.owner_user_id = ?)', [$uid]];
+}
+
+/**
+ * Filtros da listagem de leads (alias `l`), alinhados a `leads.php`.
+ *
+ * @param array<string, mixed> $q Chaves: search_id, fq, nome, cidade, estado, pais, date_from, date_to, tem_site (como em $_GET).
+ *
+ * @return array{0: string, 1: list<mixed>} Fragmento SQL com prefixo " AND ..." ou string vazia, e parâmetros.
+ */
+function minerador_admin_leads_filter_sql_from_query(array $q): array
+{
+    $where = [];
+    $params = [];
+
+    $searchId = (int) ($q['search_id'] ?? 0);
+    if ($searchId > 0) {
+        $where[] = 'l.search_id = ?';
+        $params[] = $searchId;
+    }
+
+    $fq = trim((string) ($q['fq'] ?? ''));
+    if ($fq !== '') {
+        $where[] = 'l.query_text LIKE ?';
+        $params[] = '%' . $fq . '%';
+    }
+
+    $cidade = trim((string) ($q['cidade'] ?? ''));
+    if ($cidade !== '') {
+        $where[] = 'l.cidade LIKE ?';
+        $params[] = '%' . $cidade . '%';
+    }
+
+    $estado = trim((string) ($q['estado'] ?? ''));
+    if ($estado !== '') {
+        $where[] = 'l.estado LIKE ?';
+        $params[] = '%' . $estado . '%';
+    }
+
+    $pais = trim((string) ($q['pais'] ?? ''));
+    if ($pais !== '') {
+        $where[] = 'l.pais LIKE ?';
+        $params[] = '%' . $pais . '%';
+    }
+
+    $nome = trim((string) ($q['nome'] ?? ''));
+    if ($nome !== '') {
+        $where[] = 'l.nome LIKE ?';
+        $params[] = '%' . $nome . '%';
+    }
+
+    $df = trim((string) ($q['date_from'] ?? ''));
+    if ($df !== '') {
+        $where[] = 'DATE(l.coletado_em) >= ?';
+        $params[] = $df;
+    }
+    $dt = trim((string) ($q['date_to'] ?? ''));
+    if ($dt !== '') {
+        $where[] = 'DATE(l.coletado_em) <= ?';
+        $params[] = $dt;
+    }
+
+    $tem = trim((string) ($q['tem_site'] ?? ''));
+    if ($tem === 'sim') {
+        $where[] = '(l.website IS NOT NULL AND l.website <> \'\')';
+    } elseif ($tem === 'nao') {
+        $where[] = '(l.website IS NULL OR l.website = \'\')';
+    }
+
+    $sql = $where ? (' AND ' . implode(' AND ', $where)) : '';
+
+    return [$sql, $params];
 }
 
 function minerador_admin_require_login(): void

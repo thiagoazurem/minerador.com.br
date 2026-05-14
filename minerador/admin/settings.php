@@ -35,6 +35,10 @@ $qualificacaoRulesText = rtrim($qualificacaoRulesText);
 
 
 
+$leadsIgnoreTermsRaw = minerador_settings_get_raw($pdo, MINERADOR_SETTING_LEADS_IGNORE_TERMS);
+
+
+
 $delegatedToken = '';
 
 if ($delegatedId !== null) {
@@ -69,6 +73,10 @@ if (isset($_GET['saved'])) {
     if ($_GET['saved'] === 'strings') {
 
         $flash = 'Strings de qualificação guardadas.';
+
+    } elseif ($_GET['saved'] === 'ignore_terms') {
+
+        $flash = 'Termos de leads a ignorar guardados.';
 
     } elseif ($_GET['saved'] === 'config_token') {
 
@@ -253,6 +261,32 @@ $errGet = isset($_GET['err']) ? (string) $_GET['err'] : '';
           <textarea id="qualificacao_substrings" name="qualificacao_substrings" spellcheck="false"><?= h($qualificacaoRulesText) ?></textarea>
 
           <div style="margin-top:12px;"><button type="submit" class="btn">Guardar strings</button></div>
+
+        </form>
+
+      </div>
+
+
+
+      <div class="box">
+
+        <h2>Leads a serem ignorados</h2>
+
+        <p class="muted">Termos separados por vírgula (ou um por linha). O <code>datacollect.php</code> não grava leads cujo texto (nome, site, query, morada, etc.) contenha <strong>qualquer</strong> um destes termos (comparação sem distinção de maiúsculas/minúsculas).</p>
+
+        <form method="post" action="settings_save.php">
+
+          <input type="hidden" name="csrf" value="<?= h($csrf) ?>" />
+
+          <input type="hidden" name="action" value="save_leads_ignore_terms" />
+
+          <?php if ($scopeMine): ?><input type="hidden" name="scope" value="mine" /><?php endif; ?>
+
+          <label for="leads_ignore_terms">Termos</label>
+
+          <textarea id="leads_ignore_terms" name="leads_ignore_terms" spellcheck="false"><?= h($leadsIgnoreTermsRaw) ?></textarea>
+
+          <div style="margin-top:12px;"><button type="submit" class="btn">Guardar termos</button></div>
 
         </form>
 

@@ -234,10 +234,15 @@ function minerador_cep_from_lead_payload(array $lead): string
  *
  * @param array<string, mixed> $lead
  * @param list<array{substr: string, nivel: string}> $qualificacaoRules
- * @return array{id?: int, duplicate: bool, search_id: int}|array{error: string, duplicate: bool}
+ * @param list<string> $ignoreTerms
+ * @return array{id?: int, duplicate: bool, search_id: int, ignored?: bool}|array{error: string, duplicate: bool}
  */
-function minerador_process_one_lead(PDO $pdo, array $lead, int $searchId, array $qualificacaoRules): array
+function minerador_process_one_lead(PDO $pdo, array $lead, int $searchId, array $qualificacaoRules, array $ignoreTerms = []): array
 {
+    if ($ignoreTerms !== [] && minerador_lead_payload_matches_ignore_terms($lead, $ignoreTerms)) {
+        return ['ignored' => true, 'duplicate' => false, 'search_id' => $searchId];
+    }
+
     $nome = trim((string) ($lead['nome'] ?? ''));
     $endereco = trim((string) ($lead['endereco_completo'] ?? ''));
     $urlRes = trim((string) ($lead['url_resultado'] ?? ''));
@@ -395,6 +400,7 @@ try {
     if (array_key_exists('leads', $body) && is_array($body['leads'])) {
         $searchId = minerador_upsert_search($pdo, $body, $ownerKey, $ownerUserId);
         $qualificacaoRules = minerador_settings_get_qualificacao_website_rules($pdo);
+        $ignoreTerms = minerador_settings_get_leads_ignore_terms($pdo);
         $results = [];
         $pdo->beginTransaction();
         try {
@@ -403,7 +409,7 @@ try {
                     $results[] = ['error' => 'invalid_lead', 'duplicate' => false];
                     continue;
                 }
-                $results[] = minerador_process_one_lead($pdo, $item, $searchId, $qualificacaoRules);
+                $results[] = minerador_process_one_lead($pdo, $item, $searchId, $qualificacaoRules, $ignoreTerms);
             }
             $pdo->commit();
         } catch (Throwable $e) {
@@ -420,7 +426,8 @@ try {
 
     $searchId = minerador_upsert_search($pdo, $body, $ownerKey, $ownerUserId);
     $qualificacaoRules = minerador_settings_get_qualificacao_website_rules($pdo);
-    $out = minerador_process_one_lead($pdo, $body, $searchId, $qualificacaoRules);
+    $ignoreTerms = minerador_settings_get_leads_ignore_terms($pdo);
+    $out = minerador_process_one_lead($pdo, $body, $searchId, $qualificacaoRules, $ignoreTerms);
     respond(true, $out);
 } catch (Throwable $e) {
     error_log(sprintf(
