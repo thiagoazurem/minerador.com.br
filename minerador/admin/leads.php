@@ -237,7 +237,7 @@ if ($searchInfo) {
     .btn.danger { background:#991b1b; }
     .btn.danger:hover { background:#b91c1c; }
     table { width:100%; border-collapse:collapse; font-size:13px; background:#111827; border:1px solid #1f2937; border-radius:10px; overflow:hidden; }
-    th, td { padding:10px 8px; border-bottom:1px solid #1f2937; text-align:left; vertical-align:top; }
+    th, td { padding:10px 8px; border-bottom:1px solid #1f2937;border-left:1px solid #1f2937; text-align:left; vertical-align:top; }
     th { background:#0f172a; font-size:12px; color:#9ca3af; white-space:nowrap; }
     th.th-sort { vertical-align:middle; }
     th.th-sort .th-sort-inner { display:flex; align-items:center; justify-content:flex-start; gap:8px; flex-wrap:nowrap; width:100%; box-sizing:border-box; }
@@ -401,7 +401,7 @@ if ($searchInfo) {
             <?= minerador_leads_sort_th('nome', 'Nome', $order, $dir) ?>
             <?= minerador_leads_sort_th('nota', $thStarNotaLabel, $order, $dir, 'th-sort-icon-only col-nota-avaliacoes', true, 'Nota (média) e número de avaliações') ?>
             <?= minerador_leads_sort_th('cidade', 'Local', $order, $dir) ?>
-            <th>📞</th>
+            <th>Phone</th>
             <?= minerador_leads_sort_th('website', 'Site', $order, $dir) ?>
             <?= minerador_leads_sort_th('qualificacao', '🔥', $order, $dir) ?>
             <?= minerador_leads_sort_th('coletado_em', 'Coletado', $order, $dir) ?>
