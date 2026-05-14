@@ -764,6 +764,26 @@
     return anchorEl;
   }
 
+  function foldAsciiLower(s) {
+    return String(s || "")
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase();
+  }
+
+  function enderecoContainsCidadePesquisada(state, enderecoCompleto) {
+    const cidadePesquisada = stateCidade(state).trim();
+    if (!cidadePesquisada) return true;
+    return foldAsciiLower(enderecoCompleto).includes(foldAsciiLower(cidadePesquisada));
+  }
+
+  /** Resultado patrocinado na SERP (escopo do card em #search). */
+  function serpRowHasPatrocinado(anchorEl) {
+    const scope = getSerpExtractionScope(anchorEl);
+    if (!scope || typeof scope.querySelector !== "function") return false;
+    return !!scope.querySelector('[aria-label="Patrocinado"]');
+  }
+
   function serpLineLooksLikeRatingLine(text) {
     const t = (text || "").replace(/\s+/g, " ").trim();
     if (!t) return true;
@@ -1587,6 +1607,11 @@
       if (!next) break;
 
       const hrefKey = getResultTargetKey(next);
+      if (serpRowHasPatrocinado(next)) {
+        processedHrefsThisPage.add(hrefKey);
+        if (DEBUG) dlog("Ignorado: resultado Patrocinado na SERP", hrefKey || describeEl(next));
+        continue;
+      }
       processedHrefsThisPage.add(hrefKey);
       const serpPreview = extractFromSerpRow(next);
 
@@ -1645,6 +1670,19 @@
         `Lead ${idxInPage}/${totalAnchors} — página ${pagina}`
       );
       base = applyPanelFallbacks(base);
+
+      if (!enderecoContainsCidadePesquisada(state, base.endereco_completo)) {
+        if (DEBUG) {
+          dlog(
+            "Ignorado: endereço sem a cidade pesquisada",
+            stateCidade(state).trim(),
+            base.endereco_completo
+          );
+        }
+        await closeImmersive();
+        await randomDelay(120, 350);
+        continue;
+      }
 
       const coletado_em = new Date().toISOString();
       const cg = base.comentarios_google;
